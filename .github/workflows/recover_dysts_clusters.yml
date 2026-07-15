@@ -1,0 +1,103 @@
+name: Recover Dysts clustering artifacts
+
+on:
+  push:
+    branches:
+      - analysis/recover-dysts-clusters
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract-clustering-artifacts:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out analysis branch
+        uses: actions/checkout@v4
+        with:
+          ref: analysis/recover-dysts-clusters
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Extract clustering-related notebook cells and outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.request import urlopen
+
+          notebook_url = (
+              'https://raw.githubusercontent.com/GilpinLab/dysts_data/'
+              'main/dysts_data/benchmarks/figure_descriptive_statistics.ipynb'
+          )
+          with urlopen(notebook_url) as response:
+              notebook = json.load(response)
+
+          out_dir = Path('analysis/dysts_2021_clusters')
+          out_dir.mkdir(parents=True, exist_ok=True)
+
+          all_code = []
+          relevant = []
+          keywords = ('affinity', 'umap', 'cluster', 'embedding', 'feat_arr_all')
+
+          for index, cell in enumerate(notebook.get('cells', [])):
+              source = ''.join(cell.get('source', []))
+              if cell.get('cell_type') == 'code':
+                  all_code.append(f'\n# ===== NOTEBOOK CELL {index} =====\n')
+                  all_code.append(source)
+                  all_code.append('\n')
+
+              if any(keyword in source.lower() for keyword in keywords):
+                  relevant.append(f'\n## ===== NOTEBOOK CELL {index} ({cell.get("cell_type")}) =====\n')
+                  relevant.append(source)
+                  relevant.append('\n\n### STORED TEXT OUTPUTS\n')
+                  for output in cell.get('outputs', []):
+                      if 'text' in output:
+                          text = output['text']
+                          relevant.append(''.join(text) if isinstance(text, list) else str(text))
+                          relevant.append('\n')
+                      data = output.get('data', {})
+                      for mime in ('text/plain', 'text/markdown'):
+                          if mime in data:
+                              text = data[mime]
+                              relevant.append(''.join(text) if isinstance(text, list) else str(text))
+                              relevant.append('\n')
+
+          (out_dir / 'figure_descriptive_statistics_code.py').write_text(
+              ''.join(all_code), encoding='utf-8'
+          )
+          (out_dir / 'clustering_related_cells.txt').write_text(
+              ''.join(relevant), encoding='utf-8'
+          )
+
+          summary = {
+              'source_notebook': notebook_url,
+              'number_of_cells': len(notebook.get('cells', [])),
+              'number_of_code_cells': sum(
+                  cell.get('cell_type') == 'code' for cell in notebook.get('cells', [])
+              ),
+              'relevant_cell_count': sum(
+                  any(keyword in ''.join(cell.get('source', [])).lower() for keyword in keywords)
+                  for cell in notebook.get('cells', [])
+              ),
+          }
+          (out_dir / 'extraction_summary.json').write_text(
+              json.dumps(summary, indent=2), encoding='utf-8'
+          )
+          PY
+
+      - name: Commit extracted artifacts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f analysis/dysts_2021_clusters
+          git commit -m 'Extract Dysts 2021 clustering notebook code and outputs'
+          git push origin analysis/recover-dysts-clusters
