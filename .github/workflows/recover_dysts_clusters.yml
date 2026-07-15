@@ -98,6 +98,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add analysis/dysts_2021_clusters
+          git add -f analysis/dysts_2021_clusters
           git commit -m 'Extract Dysts 2021 clustering notebook code and outputs'
           git push origin analysis/recover-dysts-clusters
